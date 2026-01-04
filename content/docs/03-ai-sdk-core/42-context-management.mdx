@@ -1,0 +1,240 @@
+---
+title: Context Management
+description: Learn how to manage context windows and message history automatically
+---
+
+# Context Management
+
+When building AI applications with long conversations or extensive message history,
+you'll eventually hit the model's context window limit. The AI SDK provides a
+**context management system** that automatically prunes messages to fit within
+token limits while preserving the most important context.
+
+## The Problem
+
+Language models have finite context windows:
+- GPT-4o: 128k tokens
+- Claude 3.5 Sonnet: 200k tokens
+- Gemini 1.5 Pro: 2M tokens
+
+When your conversation history exceeds these limits, API calls fail. 
+Context management solves this by intelligently pruning messages before 
+they're sent to the model.
+
+## Using Context Window Middleware
+
+The simplest way to manage context is with the `contextWindow` middleware:
+
+```ts
+import { openai } from '@ai-sdk/openai';
+import { contextWindow, wrapLanguageModel, generateText } from 'ai';
+
+const model = wrapLanguageModel({
+  model: openai('gpt-4o'),
+  middleware: contextWindow({
+    maxPromptTokens: 100000, // Leave room for output
+  }),
+});
+
+// Now you can pass arbitrarily long message histories
+const result = await generateText({
+  model,
+  system: 'You are a helpful assistant.',
+  messages: veryLongConversationHistory,
+});
+```
+
+The middleware automatically:
+- Estimates token counts for each message
+- Keeps system messages and recent messages
+- Removes older messages when the limit is exceeded
+
+## Model Presets
+
+Use built-in presets for popular models instead of looking up token limits:
+
+```ts
+import { contextWindowForModel, wrapLanguageModel } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const model = wrapLanguageModel({
+  model: openai('gpt-4o'),
+  middleware: contextWindowForModel('gpt-4o'),
+});
+```
+
+Available presets:
+
+| Preset | Max Prompt Tokens | Model Context |
+|--------|------------------|---------------|
+| `gpt-4o` | 100,000 | 128k |
+| `gpt-4o-mini` | 112,000 | 128k |
+| `claude-3-5-sonnet` | 192,000 | 200k |
+| `claude-3-haiku` | 196,000 | 200k |
+| `gemini-1-5-pro` | 2,000,000 | 2M |
+| `gemini-1-5-flash` | 1,000,000 | 1M |
+| `gpt-4` | 6,000 | 8k |
+| `gpt-4-32k` | 28,000 | 32k |
+| `gpt-3-5-turbo` | 12,000 | 16k |
+
+## Pruning Strategies
+
+Choose how messages are removed when the context is full:
+
+### Sliding Window (Default)
+
+Keeps the most recent messages, removing older ones:
+
+```ts
+contextWindow({
+  maxPromptTokens: 100000,
+  strategy: 'sliding-window',
+  keepRecentMessages: 5, // Always keep last 5 messages
+})
+```
+
+Best for: Chat applications where recent context is most relevant.
+
+### Keep Boundaries
+
+Preserves system messages and recent messages, removes from the middle:
+
+```ts
+contextWindow({
+  maxPromptTokens: 100000,
+  strategy: 'keep-boundaries',
+})
+```
+
+Best for: Applications where both initial context and recent messages matter.
+
+### Priority-Based
+
+Removes lowest priority messages first, regardless of position:
+
+```ts
+contextWindow({
+  maxPromptTokens: 100000,
+  strategy: 'priority-based',
+  assignPriority: (message, index, messages) => {
+    if (message.role === 'system') return 'critical';
+    if (message.role === 'user') return 'high';
+    if (message.role === 'tool') return 'low';
+    return 'normal';
+  },
+})
+```
+
+Best for: Applications where certain messages are more important than others.
+
+## Priority Levels
+
+The priority system has four levels:
+
+| Priority | Description |
+|----------|-------------|
+| `critical` | Never removed (system messages) |
+| `high` | Removed last |
+| `normal` | Default priority |
+| `low` | Removed first |
+
+## Token Estimation
+
+By default, context management uses a character-based estimation (~3.5 chars/token).
+For more accuracy, plug in a real tokenizer:
+
+```ts
+import { encodingForModel } from 'js-tiktoken';
+
+const enc = encodingForModel('gpt-4o');
+
+contextWindow({
+  maxPromptTokens: 100000,
+  estimateTokens: (message) => {
+    const text = JSON.stringify(message);
+    return enc.encode(text).length;
+  },
+})
+```
+
+## Monitoring Pruning
+
+Get notified when messages are pruned:
+
+```ts
+contextWindow({
+  maxPromptTokens: 100000,
+  onPrune: (result) => {
+    console.log(`Pruned ${result.removedCount} messages`);
+    console.log(`Now using ${result.totalTokens} tokens`);
+    console.log(`Removed indices: ${result.removedIndices}`);
+  },
+})
+```
+
+## Using with Agents
+
+Context management works seamlessly with agents:
+
+```ts
+import { ToolLoopAgent, contextWindow, wrapLanguageModel } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const agent = new ToolLoopAgent({
+  model: wrapLanguageModel({
+    model: openai('gpt-4o'),
+    middleware: contextWindow({ maxPromptTokens: 100000 }),
+  }),
+  instructions: 'You are a helpful assistant.',
+  tools: {
+    // your tools
+  },
+});
+```
+
+## Advanced: Direct Pruning
+
+For more control, use `pruneContext` directly:
+
+```ts
+import { pruneContext } from 'ai';
+
+const result = await pruneContext(messages, {
+  maxPromptTokens: 100000,
+  strategy: 'priority-based',
+  assignPriority: (msg) => msg.role === 'system' ? 'critical' : 'normal',
+});
+
+console.log(result.messages);      // Pruned messages
+console.log(result.totalTokens);   // Token count
+console.log(result.removedCount);  // How many removed
+```
+
+## Configuration Reference
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxPromptTokens` | `number` | Required | Maximum tokens for the prompt |
+| `strategy` | `'sliding-window' \| 'keep-boundaries' \| 'priority-based'` | `'sliding-window'` | Pruning strategy |
+| `keepRecentMessages` | `number` | `2` | Messages to always keep |
+| `systemTokenBudget` | `number` | `2000` | Reserved tokens for system messages |
+| `estimateTokens` | `function` | Character-based | Custom token estimator |
+| `assignPriority` | `function` | Role-based | Custom priority assignment |
+| `onPrune` | `function` | None | Callback when pruning occurs |
+
+## Best Practices
+
+1. **Leave room for output**: Set `maxPromptTokens` lower than the model's limit
+   to leave space for the response.
+
+2. **Use priority-based for complex apps**: When different messages have different
+   importance, use the priority system.
+
+3. **Monitor pruning in development**: Use `onPrune` to understand what's being
+   removed.
+
+4. **Consider summarization**: For very long conversations, consider periodically
+   summarizing older messages instead of just removing them.
+
+5. **Test with real tokenizers**: Character-based estimation is fast but approximate.
+   For production, consider using model-specific tokenizers.

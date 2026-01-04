@@ -1,0 +1,216 @@
+---
+title: Agent Context Management
+description: Build agents that automatically manage context windows for long conversations
+---
+
+# Agent Context Management
+
+Long-running agents can accumulate extensive conversation history, eventually
+exceeding the model's context window. The `ManagedContextAgent` class provides
+built-in context management that automatically prunes older messages while
+preserving the most important context.
+
+## The ManagedContextAgent
+
+The `ManagedContextAgent` combines the power of the `ToolLoopAgent` with
+automatic context window management:
+
+```ts
+import { ManagedContextAgent } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const agent = new ManagedContextAgent({
+  model: openai('gpt-4o'),
+  context: { preset: 'gpt-4o' },
+  instructions: 'You are a helpful assistant.',
+  tools: {
+    // your tools
+  },
+});
+```
+
+## Using Model Presets
+
+The simplest configuration uses a model preset:
+
+```ts
+const agent = new ManagedContextAgent({
+  model: openai('gpt-4o'),
+  context: { preset: 'gpt-4o' },
+  instructions: 'You are a helpful assistant.',
+});
+```
+
+Available presets include:
+- `gpt-4o`, `gpt-4o-mini`
+- `claude-3-5-sonnet`, `claude-3-haiku`
+- `gemini-1-5-pro`, `gemini-1-5-flash`
+- And more...
+
+## Custom Token Limits
+
+For fine-grained control, specify token limits directly:
+
+```ts
+const agent = new ManagedContextAgent({
+  model: openai('gpt-4o'),
+  context: {
+    maxPromptTokens: 80000, // Custom limit
+    keepRecentMessages: 5,  // Keep last 5 messages
+  },
+  instructions: 'You are a helpful assistant.',
+});
+```
+
+## Priority-Based Pruning
+
+For agents with tools, use priority-based pruning to keep important messages:
+
+```ts
+const agent = new ManagedContextAgent({
+  model: openai('gpt-4o'),
+  context: {
+    preset: 'gpt-4o',
+    strategy: 'priority-based',
+    assignPriority: (message) => {
+      // System messages are always kept
+      if (message.role === 'system') return 'critical';
+      
+      // User messages are important
+      if (message.role === 'user') return 'high';
+      
+      // Tool results can be regenerated
+      if (message.role === 'tool') return 'low';
+      
+      return 'normal';
+    },
+  },
+  instructions: 'You are a research assistant.',
+  tools: {
+    search: searchTool,
+    analyze: analyzeTool,
+  },
+});
+```
+
+## Monitoring Context
+
+Track when the agent prunes context:
+
+```ts
+const agent = new ManagedContextAgent({
+  model: openai('gpt-4o'),
+  context: {
+    preset: 'gpt-4o',
+    onPrune: (result) => {
+      console.log(`Pruned ${result.removedCount} messages`);
+      console.log(`Using ${result.totalTokens} tokens`);
+      
+      // Optionally log which messages were removed
+      console.log(`Removed indices: ${result.removedIndices}`);
+    },
+  },
+  instructions: 'You are a helpful assistant.',
+});
+```
+
+## Full Configuration Example
+
+Here's a complete example with all configuration options:
+
+```ts
+import { ManagedContextAgent, tool } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+
+const researchAgent = new ManagedContextAgent({
+  id: 'research-agent',
+  
+  model: openai('gpt-4o'),
+  
+  context: {
+    maxPromptTokens: 100000,
+    strategy: 'priority-based',
+    keepRecentMessages: 4,
+    
+    assignPriority: (message, index, messages) => {
+      if (message.role === 'system') return 'critical';
+      if (message.role === 'user') return 'high';
+      if (message.role === 'tool') return 'low';
+      return 'normal';
+    },
+    
+    onPrune: (result) => {
+      console.log(`Context pruned: ${result.removedCount} messages removed`);
+    },
+  },
+  
+  instructions: `You are a research assistant with access to search and
+  document analysis tools. Provide thorough, well-researched answers.`,
+  
+  tools: {
+    search: tool({
+      description: 'Search for information',
+      inputSchema: z.object({
+        query: z.string(),
+      }),
+      execute: async ({ query }) => {
+        // Search implementation
+        return { results: [] };
+      },
+    }),
+  },
+  
+  // Standard agent options
+  maxOutputTokens: 4000,
+  temperature: 0.7,
+});
+
+// Use the agent
+const result = await researchAgent.generate({
+  prompt: 'Research the history of machine learning',
+});
+
+console.log(result.text);
+```
+
+## Convenience Function
+
+Use `createManagedAgent` for a functional approach:
+
+```ts
+import { createManagedAgent } from 'ai';
+
+const agent = createManagedAgent({
+  model: openai('gpt-4o'),
+  context: { preset: 'gpt-4o' },
+  instructions: 'You are helpful.',
+});
+```
+
+## When to Use ManagedContextAgent
+
+Use `ManagedContextAgent` when:
+
+- **Long conversations**: Chat applications where history can grow indefinitely
+- **Tool-heavy agents**: Agents that make many tool calls, generating lots of context
+- **Research agents**: Agents that accumulate search results and analysis
+- **Customer support**: Agents handling extended support sessions
+
+For short, simple interactions, the standard `ToolLoopAgent` may be sufficient.
+
+## Comparison with ToolLoopAgent
+
+| Feature | ToolLoopAgent | ManagedContextAgent |
+|---------|---------------|---------------------|
+| Tool loop | ✅ | ✅ |
+| Context management | ❌ | ✅ |
+| Priority pruning | ❌ | ✅ |
+| Token tracking | ❌ | ✅ |
+| Long conversations | ⚠️ May exceed limits | ✅ Automatic pruning |
+
+## Next Steps
+
+- Learn about [pruning strategies](/docs/ai-sdk-core/context-management)
+- Explore [building agents](/docs/agents/building-agents)
+- See [loop control](/docs/agents/loop-control) for advanced agent control
