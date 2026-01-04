@@ -1,90 +1,66 @@
 import { LanguageModelV3Middleware } from '@ai-sdk/provider';
-import { pruneContext } from './prune-context';
-import { ContextWindowConfig } from './types';
+import { selectContext } from './select-context';
+import { ContextWindowOptions } from './types';
 
 /**
- * Creates a middleware that manages the context window by automatically
- * pruning messages to fit within the specified token limit.
+ * Creates middleware that automatically manages the context window.
  *
- * This middleware transparently manages your conversation history so you
- * don't have to manually track token counts or implement pruning logic.
+ * Messages are selected based on their priority score.
+ * Higher priority = more important = kept longer.
  *
- * @example Basic usage
+ * @example Basic usage with default recency-based selection
  * ```ts
+ * import { wrapLanguageModel, contextWindow } from 'ai';
  * import { openai } from '@ai-sdk/openai';
- * import { contextWindow, wrapLanguageModel, generateText } from 'ai';
  *
  * const model = wrapLanguageModel({
  *   model: openai('gpt-4o'),
- *   middleware: contextWindow({ maxPromptTokens: 100000 }),
- * });
- *
- * // Now you can pass arbitrarily long message histories
- * // and the middleware will automatically prune to fit
- * const result = await generateText({
- *   model,
- *   messages: veryLongMessageHistory,
+ *   middleware: contextWindow({ maxTokens: 100000 }),
  * });
  * ```
  *
- * @example With custom strategy
+ * @example Custom priority function
  * ```ts
- * const model = wrapLanguageModel({
- *   model: openai('gpt-4o'),
- *   middleware: contextWindow({
- *     maxPromptTokens: 100000,
- *     strategy: 'priority-based',
- *     assignPriority: (message, index, messages) => {
- *       // Keep user messages with high priority
- *       if (message.role === 'user') return 'high';
- *       // Tool results can be regenerated
- *       if (message.role === 'tool') return 'low';
- *       return 'normal';
- *     },
- *     onPrune: (result) => {
- *       console.log(`Pruned ${result.removedCount} messages`);
- *     },
- *   }),
- * });
+ * contextWindow({
+ *   maxTokens: 100000,
+ *   priority: (message, { index }) => {
+ *     if (message.role === 'system') return Infinity; // Always keep
+ *     if (message.role === 'user') return 1000 + index;
+ *     if (message.role === 'tool') return index;
+ *     return 500 + index;
+ *   },
+ * })
  * ```
  *
- * @example With real tokenizer
+ * @example Using built-in priority helpers
  * ```ts
- * import { encodingForModel } from 'js-tiktoken';
+ * import { contextWindow, byRole } from 'ai';
  *
- * const enc = encodingForModel('gpt-4o');
- *
- * const model = wrapLanguageModel({
- *   model: openai('gpt-4o'),
- *   middleware: contextWindow({
- *     maxPromptTokens: 100000,
- *     estimateTokens: (message) => {
- *       const text = JSON.stringify(message);
- *       return enc.encode(text).length;
- *     },
+ * contextWindow({
+ *   maxTokens: 100000,
+ *   priority: byRole({
+ *     system: Infinity,
+ *     user: 1000,
+ *     assistant: 500,
+ *     tool: 100,
  *   }),
- * });
+ * })
  * ```
  */
 export function contextWindow(
-  config: ContextWindowConfig,
+  options: ContextWindowOptions,
 ): LanguageModelV3Middleware {
   return {
     specificationVersion: 'v3',
-
     transformParams: async ({ params }) => {
-      const { prompt, ...rest } = params;
+      const result = await selectContext(params.prompt, options);
 
-      // Prune the prompt to fit within the token limit
-      const result = await pruneContext(prompt, config);
-
-      // Call the onPrune callback if messages were removed
-      if (result.removedCount > 0 && config.onPrune) {
-        config.onPrune(result);
+      if (result.dropped && options.onDrop) {
+        options.onDrop(result.dropped);
       }
 
       return {
-        ...rest,
+        ...params,
         prompt: result.messages,
       };
     },
@@ -92,94 +68,65 @@ export function contextWindow(
 }
 
 /**
- * Common context window presets for popular models.
- *
- * These presets provide sensible defaults for token limits,
- * leaving room for output generation.
+ * Common model context window sizes.
  */
-export const contextWindowPresets = {
-  /**
-   * GPT-4o: 128k context, reserve 28k for output
-   */
-  'gpt-4o': {
-    maxPromptTokens: 100000,
-  },
+export const modelContextLimits = {
+  // OpenAI
+  'gpt-4o': 128000,
+  'gpt-4o-mini': 128000,
+  'gpt-4-turbo': 128000,
+  'gpt-4': 8192,
+  'gpt-3.5-turbo': 16385,
+  'o1': 200000,
+  'o1-mini': 128000,
+  'o3-mini': 200000,
 
-  /**
-   * GPT-4o-mini: 128k context, reserve 16k for output
-   */
-  'gpt-4o-mini': {
-    maxPromptTokens: 112000,
-  },
+  // Anthropic
+  'claude-3-5-sonnet': 200000,
+  'claude-3-5-haiku': 200000,
+  'claude-3-opus': 200000,
+  'claude-3-sonnet': 200000,
+  'claude-3-haiku': 200000,
 
-  /**
-   * Claude 3.5 Sonnet: 200k context, reserve 8k for output
-   */
-  'claude-3-5-sonnet': {
-    maxPromptTokens: 192000,
-  },
+  // Google
+  'gemini-2.0-flash': 1000000,
+  'gemini-1.5-pro': 2000000,
+  'gemini-1.5-flash': 1000000,
 
-  /**
-   * Claude 3 Haiku: 200k context, reserve 4k for output
-   */
-  'claude-3-haiku': {
-    maxPromptTokens: 196000,
-  },
+  // Others
+  'deepseek-chat': 64000,
+  'llama-3.1-405b': 128000,
+  'llama-3.1-70b': 128000,
+  'mistral-large': 128000,
+} as const;
 
-  /**
-   * Gemini 1.5 Pro: 2M context, reserve 8k for output
-   */
-  'gemini-1-5-pro': {
-    maxPromptTokens: 2000000,
-  },
-
-  /**
-   * Gemini 1.5 Flash: 1M context, reserve 8k for output
-   */
-  'gemini-1-5-flash': {
-    maxPromptTokens: 1000000,
-  },
-
-  /**
-   * GPT-4: 8k context, reserve 2k for output
-   */
-  'gpt-4': {
-    maxPromptTokens: 6000,
-  },
-
-  /**
-   * GPT-4 32k: 32k context, reserve 4k for output
-   */
-  'gpt-4-32k': {
-    maxPromptTokens: 28000,
-  },
-
-  /**
-   * GPT-3.5 Turbo: 16k context, reserve 4k for output
-   */
-  'gpt-3-5-turbo': {
-    maxPromptTokens: 12000,
-  },
-} as const satisfies Record<string, Partial<ContextWindowConfig>>;
+export type KnownModel = keyof typeof modelContextLimits;
 
 /**
- * Creates a context window middleware using a model preset.
+ * Creates context window middleware for a known model.
  *
  * @example
  * ```ts
+ * import { wrapLanguageModel, forModel } from 'ai';
+ * import { openai } from '@ai-sdk/openai';
+ *
  * const model = wrapLanguageModel({
  *   model: openai('gpt-4o'),
- *   middleware: contextWindowForModel('gpt-4o'),
+ *   middleware: forModel('gpt-4o', {
+ *     priority: (msg, { index }) => {
+ *       if (msg.role === 'system') return Infinity;
+ *       return index;
+ *     },
+ *   }),
  * });
  * ```
  */
-export function contextWindowForModel(
-  modelName: keyof typeof contextWindowPresets,
-  overrides?: Partial<ContextWindowConfig>,
+export function forModel(
+  model: KnownModel,
+  options?: Omit<ContextWindowOptions, 'maxTokens'>,
 ): LanguageModelV3Middleware {
-  const preset = contextWindowPresets[modelName];
   return contextWindow({
-    ...preset,
-    ...overrides,
+    maxTokens: modelContextLimits[model],
+    ...options,
   });
 }

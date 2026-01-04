@@ -1,9 +1,23 @@
 // Context Window Middleware
 export {
   contextWindow,
-  contextWindowForModel,
-  contextWindowPresets,
+  forModel,
+  modelContextLimits,
 } from './context-window-middleware';
+export type { KnownModel } from './context-window-middleware';
+
+// Priority Functions
+export {
+  boost,
+  byRole,
+  combine,
+  drop,
+  pin,
+  recency,
+} from './priority';
+
+// Core Selection
+export { selectContext } from './select-context';
 
 // Token Estimation
 export {
@@ -13,26 +27,12 @@ export {
   estimateTextTokens,
 } from './estimate-tokens';
 
-// Core Pruning Function
-export { pruneContext } from './prune-context';
-
-// Managed Context Agent
-export {
-  createManagedAgent,
-  ManagedContextAgent,
-} from './managed-context-agent';
-
 // Types
 export type {
-  AnnotatedMessage,
-  ContextWindowConfig,
-  MessagePriority,
-  PruneResult,
-  PruningStrategy,
+  ContextWindowOptions,
+  DropInfo,
+  PriorityContext,
+  PriorityFunction,
+  SelectResult,
   TokenEstimator,
 } from './types';
-
-export type {
-  AgentContextConfig,
-  ManagedContextAgentSettings,
-} from './managed-context-agent';

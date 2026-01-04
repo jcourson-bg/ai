@@ -1,177 +1,122 @@
 import { LanguageModelV3Message } from '@ai-sdk/provider';
 
 /**
- * Token estimation function type.
- * Used to estimate the number of tokens in a message.
+ * Function to estimate tokens in a message.
  */
 export type TokenEstimator = (
   message: LanguageModelV3Message,
 ) => number | Promise<number>;
 
 /**
- * Priority level for messages in the context window.
- * Higher priority messages are kept when pruning is needed.
+ * Context for the priority function.
  */
-export type MessagePriority = 'critical' | 'high' | 'normal' | 'low';
-
-/**
- * Annotated message with priority and metadata for context management.
- */
-export interface AnnotatedMessage {
+export interface PriorityContext {
   /**
-   * The original message.
+   * Index of the message (0 = oldest).
    */
-  message: LanguageModelV3Message;
+  index: number;
 
   /**
-   * Priority level of this message.
-   * @default 'normal'
+   * Total number of messages.
    */
-  priority: MessagePriority;
+  total: number;
 
   /**
    * Estimated token count for this message.
    */
-  tokenCount: number;
-
-  /**
-   * Original index in the message array.
-   */
-  originalIndex: number;
-
-  /**
-   * Whether this message is pinned and should never be removed.
-   */
-  pinned: boolean;
+  tokens: number;
 }
 
 /**
- * Result of a pruning operation.
+ * Function to determine message priority.
+ *
+ * Return a number. Higher = more important = kept longer.
+ * Return `Infinity` to always keep a message (pinned).
+ * Return `-Infinity` to always drop a message.
  */
-export interface PruneResult {
+export type PriorityFunction = (
+  message: LanguageModelV3Message,
+  context: PriorityContext,
+) => number;
+
+/**
+ * Information about messages that were dropped.
+ */
+export interface DropInfo {
   /**
-   * The pruned messages that fit within the token limit.
+   * Number of messages dropped.
+   */
+  count: number;
+
+  /**
+   * Total tokens in dropped messages.
+   */
+  tokens: number;
+
+  /**
+   * The messages that were dropped (in original order).
+   */
+  messages: LanguageModelV3Message[];
+}
+
+/**
+ * Result of selecting messages for the context window.
+ */
+export interface SelectResult {
+  /**
+   * Messages to keep (in original order).
    */
   messages: LanguageModelV3Message[];
 
   /**
-   * Total estimated tokens in the pruned messages.
+   * Total tokens in kept messages.
    */
-  totalTokens: number;
+  tokens: number;
 
   /**
-   * Number of messages that were removed.
+   * Information about dropped messages, if any.
    */
-  removedCount: number;
-
-  /**
-   * Indices of messages that were removed (from original array).
-   */
-  removedIndices: number[];
+  dropped?: DropInfo;
 }
-
-/**
- * Strategy for selecting which messages to remove when pruning.
- */
-export type PruningStrategy =
-  | 'sliding-window' // Keep most recent messages
-  | 'keep-boundaries' // Keep first + last messages, remove middle
-  | 'priority-based'; // Remove lowest priority first, then oldest
 
 /**
  * Configuration for the context window middleware.
  */
-export interface ContextWindowConfig {
+export interface ContextWindowOptions {
   /**
-   * Maximum number of tokens allowed for the prompt.
-   * This should be less than the model's context window to leave room for output.
-   *
-   * @example 100000 for GPT-4o (128k context - 28k for output)
+   * Maximum tokens for the prompt.
    */
-  maxPromptTokens: number;
+  maxTokens: number;
 
   /**
-   * Strategy for pruning messages when the context exceeds the limit.
+   * Function to determine message priority.
    *
-   * - `'sliding-window'`: Keep the most recent messages (default)
-   * - `'keep-boundaries'`: Keep system message and recent messages, remove middle
-   * - `'priority-based'`: Remove lowest priority messages first
+   * Higher priority = more important = kept longer.
+   * Return `Infinity` to pin a message (always keep).
    *
-   * @default 'sliding-window'
-   */
-  strategy?: PruningStrategy;
-
-  /**
-   * Number of recent messages to always keep (regardless of strategy).
-   * System messages are always kept.
+   * @default Recency-based (newer messages have higher priority)
    *
-   * @default 2
-   */
-  keepRecentMessages?: number;
-
-  /**
-   * Reserved token budget for the system message(s).
-   * If system messages exceed this, they will be truncated.
-   *
-   * @default 2000
-   */
-  systemTokenBudget?: number;
-
-  /**
-   * Custom token estimator function.
-   * By default uses a character-based approximation.
-   *
-   * You can provide a real tokenizer for more accurate results:
-   * @example
+   * @example Keep system messages, prioritize user messages
    * ```ts
-   * import { encodingForModel } from 'js-tiktoken';
-   * const enc = encodingForModel('gpt-4o');
-   *
-   * contextWindow({
-   *   maxPromptTokens: 100000,
-   *   estimateTokens: (msg) => {
-   *     const text = JSON.stringify(msg);
-   *     return enc.encode(text).length;
-   *   }
-   * })
+   * priority: (message, { index }) => {
+   *   if (message.role === 'system') return Infinity;
+   *   if (message.role === 'user') return 1000 + index;
+   *   if (message.role === 'tool') return index;
+   *   return 500 + index;
+   * }
    * ```
+   */
+  priority?: PriorityFunction;
+
+  /**
+   * Custom token estimator.
+   *
+   * @default Character-based estimation (~3.5 chars/token)
    */
   estimateTokens?: TokenEstimator;
 
   /**
-   * Function to assign priorities to messages.
-   * By default, all messages have 'normal' priority.
-   *
-   * @example
-   * ```ts
-   * assignPriority: (message, index, messages) => {
-   *   // Keep all user messages with high priority
-   *   if (message.role === 'user') return 'high';
-   *   // Mark tool results as low priority (can be regenerated)
-   *   if (message.role === 'tool') return 'low';
-   *   return 'normal';
-   * }
-   * ```
+   * Callback when messages are dropped.
    */
-  assignPriority?: (
-    message: LanguageModelV3Message,
-    index: number,
-    messages: LanguageModelV3Message[],
-  ) => MessagePriority;
-
-  /**
-   * Callback when messages are pruned.
-   * Useful for logging or debugging.
-   */
-  onPrune?: (result: PruneResult) => void;
+  onDrop?: (info: DropInfo) => void;
 }
-
-/**
- * Priority weights for sorting.
- */
-export const PRIORITY_WEIGHTS: Record<MessagePriority, number> = {
-  critical: 4,
-  high: 3,
-  normal: 2,
-  low: 1,
-};
