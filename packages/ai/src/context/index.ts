@@ -1,23 +1,17 @@
-// Context Window Middleware
-export {
-  contextWindow,
-  forModel,
-  modelContextLimits,
-} from './context-window-middleware';
-export type { KnownModel } from './context-window-middleware';
+// Context Manager
+export { Context, createContext } from './context';
 
-// Priority Functions
+// Filters (cheap, run every buildPrompt)
 export {
-  boost,
-  byRole,
-  combine,
-  drop,
-  pin,
-  recency,
-} from './priority';
+  keepRecent,
+  redact,
+  redactOldToolResults,
+  remove,
+  truncate,
+} from './filters';
 
-// Core Selection
-export { selectContext } from './select-context';
+// Compactors (expensive, run periodically)
+export { concatenate, extractFacts, summarize } from './compactors';
 
 // Token Estimation
 export {
@@ -29,10 +23,14 @@ export {
 
 // Types
 export type {
-  ContextWindowOptions,
-  DropInfo,
-  PriorityContext,
-  PriorityFunction,
-  SelectResult,
+  BuildPromptOptions,
+  CompactOptions,
+  CompactionTrigger,
+  Compactor,
+  ContextConfig,
+  ContextSnapshot,
+  Filter,
+  FilterContext,
+  Segment,
   TokenEstimator,
 } from './types';
