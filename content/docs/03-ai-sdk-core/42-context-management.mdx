@@ -1,0 +1,293 @@
+---
+title: Context Management
+description: Manage conversation history with filtering and compaction
+---
+
+# Context Management
+
+Long conversations can exceed a model's context window. The AI SDK provides a `Context` class that handles this with two mechanisms:
+
+1. **Filtering** — Cheap, deterministic transformations that run on every LLM call
+2. **Compaction** — Expensive summarization that runs periodically (may use an LLM)
+
+Both preserve the original messages while managing what gets sent to the model.
+
+## Quick Start
+
+```ts
+import { createContext, redactOldToolResults, summarize } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const context = createContext({
+  // Filters: cheap, run every buildPrompt()
+  filters: [redactOldToolResults(5)],
+
+  // Compactor: expensive, runs when triggered
+  compactor: summarize({ model: openai('gpt-4o-mini') }),
+  trigger: { tokens: 50000 },
+});
+
+// Add messages
+context.append({ role: 'user', content: [{ type: 'text', text: 'Hello' }] });
+
+// Build prompt for LLM (applies filters, uses compacted segments)
+const prompt = await context.buildPrompt();
+
+// Original messages are always preserved
+context.messages; // Full history
+```
+
+## Filters
+
+Filters are cheap, deterministic functions that transform messages. They run every time you call `buildPrompt()`.
+
+### Built-in Filters
+
+```ts
+import {
+  redact,
+  redactOldToolResults,
+  remove,
+  truncate,
+  keepRecent,
+} from 'ai';
+
+// Redact old tool results (keep structure, replace content)
+redactOldToolResults(5, '[Result omitted]')
+
+// Remove messages entirely
+remove((msg, { age }) => msg.role === 'tool' && age > 10)
+
+// Redact with placeholder
+redact(
+  (msg, { age }) => msg.role === 'tool' && age > 5,
+  '[Redacted for context management]'
+)
+
+// Truncate long text content
+truncate(1000, '... [truncated]')
+
+// Keep only recent messages
+keepRecent(20)
+```
+
+### Filter Context
+
+Each filter receives context about the message:
+
+```ts
+type Filter = (
+  message: Message,
+  context: {
+    index: number;  // Position in full history
+    total: number;  // Total message count
+    age: number;    // Distance from most recent (0 = newest)
+  }
+) => Message | null; // Return null to remove
+```
+
+### Custom Filters
+
+```ts
+const myFilter: Filter = (message, { age }) => {
+  // Remove tool messages older than 10
+  if (message.role === 'tool' && age > 10) {
+    return null;
+  }
+
+  // Redact large images
+  if (message.role === 'user' && hasLargeImage(message)) {
+    return replaceImageWithPlaceholder(message);
+  }
+
+  return message;
+};
+
+const context = createContext({
+  filters: [myFilter],
+});
+```
+
+## Compaction
+
+Compaction summarizes chunks of old messages into "segments". This is expensive (typically uses an LLM) and runs periodically, not on every call.
+
+### When Compaction Runs
+
+- **Manually**: Call `context.compact()`
+- **Automatically**: When `trigger` threshold is exceeded during `buildPrompt()`
+
+```ts
+const context = createContext({
+  compactor: summarize({ model: openai('gpt-4o-mini') }),
+
+  // Auto-trigger when uncompacted tokens exceed 50k
+  trigger: { tokens: 50000 },
+  // Or: trigger: { messages: 100 }
+
+  // Keep last 10 messages uncompacted
+  keepRecent: 10,
+});
+```
+
+### Built-in Compactors
+
+```ts
+import { summarize, extractFacts, concatenate } from 'ai';
+
+// Summarize conversation
+summarize({
+  model: openai('gpt-4o-mini'),
+  prompt: 'Summarize preserving key decisions and context...',
+  maxTokens: 500,
+})
+
+// Extract key facts as bullet points
+extractFacts({
+  model: openai('gpt-4o-mini'),
+  maxTokens: 400,
+})
+
+// Simple concatenation (no LLM, for testing)
+concatenate({ maxLength: 2000 })
+```
+
+### Custom Compactors
+
+```ts
+const myCompactor: Compactor = async (messages) => {
+  // Your logic to compress messages into a summary
+  const summary = await myLLM.summarize(messages);
+
+  return {
+    role: 'system',
+    content: `[Previous context]\n${summary}`,
+  };
+};
+```
+
+### How Segments Work
+
+When compaction runs:
+
+1. Messages are divided: `[compacted chunk] | [recent messages]`
+2. The compactor summarizes the chunk into a segment
+3. `buildPrompt()` returns: `[segments...] + [recent filtered messages]`
+
+```ts
+await context.compact();
+
+// Check what was compacted
+context.segments; // Array of Segment objects
+context.segments[0].range; // [0, 50] - message indices covered
+context.segments[0].content; // The summary message
+```
+
+## Persistence
+
+Save and restore context state:
+
+```ts
+// Export for storage
+const snapshot = context.toSnapshot();
+// { messages: [...], segments: [...], version: 1 }
+
+// Save to database, file, etc.
+await db.save('conversation:123', JSON.stringify(snapshot));
+
+// Restore later
+const data = JSON.parse(await db.get('conversation:123'));
+const restored = Context.fromSnapshot(data, {
+  compactor: summarize({ model }),
+});
+```
+
+The snapshot includes:
+- **All original messages** — Never lost, even if compacted
+- **Cached segments** — Summaries of compacted chunks
+- **Version** — For future migrations
+
+## Callbacks
+
+Monitor context operations:
+
+```ts
+const context = createContext({
+  onCompact: (segment) => {
+    console.log(`Compacted ${segment.range[1] - segment.range[0]} messages`);
+    console.log(`Segment tokens: ${segment.tokens}`);
+    
+    // Maybe persist the segment
+    saveSegment(segment);
+  },
+});
+```
+
+## Full Example
+
+```ts
+import {
+  Context,
+  createContext,
+  redactOldToolResults,
+  remove,
+  summarize,
+  generateText,
+} from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+// Create context with full configuration
+const context = createContext({
+  // Cheap filters (every call)
+  filters: [
+    redactOldToolResults(5),
+    remove((msg, { age }) => msg.role === 'tool' && age > 20),
+  ],
+
+  // Expensive compaction (periodic)
+  compactor: summarize({ model: openai('gpt-4o-mini') }),
+  trigger: { tokens: 50000 },
+  keepRecent: 10,
+
+  // Notifications
+  onCompact: (segment) => {
+    console.log(`Created segment covering ${segment.range}`);
+  },
+});
+
+// Conversation loop
+async function chat(userMessage: string) {
+  context.append({
+    role: 'user',
+    content: [{ type: 'text', text: userMessage }],
+  });
+
+  const { text, response } = await generateText({
+    model: openai('gpt-4o'),
+    messages: await context.buildPrompt(),
+  });
+
+  context.append({
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+  });
+
+  return text;
+}
+```
+
+## Key Concepts
+
+| Concept | When | Cost | Deterministic |
+|---------|------|------|---------------|
+| **Filters** | Every `buildPrompt()` | Cheap | Yes |
+| **Compaction** | Threshold exceeded or manual | Expensive | No (uses LLM) |
+| **Segments** | Result of compaction | N/A | Cached |
+
+## Best Practices
+
+1. **Use filters for quick wins** — Redacting old tool results is cheap and effective
+2. **Set conservative thresholds** — Don't compact too aggressively
+3. **Persist snapshots** — Store both messages and segments
+4. **Monitor compaction** — Use `onCompact` to track what's happening
+5. **Test with concatenate first** — Before using LLM compactors
