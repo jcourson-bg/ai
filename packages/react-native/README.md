@@ -185,16 +185,22 @@ function ManualMarkdown({ text }) {
 }
 ```
 
-### Server-Side Markdown Parsing (Maximum Performance)
+### Server-Side Markdown Parsing (v0 Approach - Maximum Performance)
 
-For the best performance on React Native, parse markdown on the server and stream the JSON tree. This is the approach used by v0's mobile app.
+For the best performance on React Native, parse markdown on the server and stream JSON tree patches. This is the approach used by v0's mobile app.
 
-**Server (Next.js API route):**
+**The key insight:** Don't parse markdown in React Native. Let the server do it.
+
+#### Option 1: Wrap your existing response (Easiest!)
+
+Just wrap your existing `toUIMessageStreamResponse()` call:
+
+**Server:**
 
 ```typescript
 import { streamText } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { createMarkdownStreamResponse } from '@ai-sdk/react-native/server';
+import { wrapWithMarkdownParsing } from '@ai-sdk/react-native/server';
 
 export async function POST(req: Request) {
   const { messages } = await req.json();
@@ -204,20 +210,90 @@ export async function POST(req: Request) {
     messages,
   });
 
-  // Streams markdown tree patches instead of raw text
-  return createMarkdownStreamResponse(result.textStream, {
-    onFinish: tree => {
-      console.log('Final tree:', tree);
-    },
-  });
+  // Just wrap it! Server now parses markdown and streams tree patches
+  return wrapWithMarkdownParsing(result.toUIMessageStreamResponse());
 }
 ```
 
 **Client:**
 
 ```tsx
-// For server-parsed markdown, use the streaming utilities
-import { applyMarkdownTreePatch, MarkdownRenderer } from '@ai-sdk/react-native';
+import {
+  useChat,
+  createMarkdownFetch,
+  MarkdownRenderer,
+} from '@ai-sdk/react-native';
+
+function Chat() {
+  const { messages, sendMessage, status } = useChat({
+    api: '/api/chat',
+    // Use the markdown-aware fetch
+    fetch: createMarkdownFetch(),
+  });
+
+  return (
+    <ScrollView>
+      {messages.map(message => (
+        <View key={message.id}>
+          {message.parts.map((part, index) => {
+            if (part.type === 'text') {
+              // The markdownTree is automatically attached by the server!
+              if (part.markdownTree) {
+                return (
+                  <MarkdownRenderer key={index} tree={part.markdownTree} />
+                );
+              }
+              // Fallback for non-enhanced responses
+              return <MarkdownText key={index} text={part.text} />;
+            }
+            // Tools, reasoning, etc. all work normally
+            if (isToolUIPart(part)) {
+              return <ToolCard key={index} part={part} />;
+            }
+            return null;
+          })}
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+```
+
+#### Option 2: Use the transform stream directly
+
+For more control, pipe through the transform:
+
+**Server:**
+
+```typescript
+import { streamText } from 'ai';
+import { createMarkdownEnhancedTransform } from '@ai-sdk/react-native/server';
+
+export async function POST(req: Request) {
+  const result = streamText({ model: openai('gpt-4o'), messages });
+
+  const stream = result
+    .toUIMessageStream()
+    .pipeThrough(createMarkdownEnhancedTransform());
+
+  return new Response(stream, {
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+```
+
+#### Option 3: Standalone markdown streaming
+
+For maximum control, stream markdown trees only:
+
+```typescript
+import { createMarkdownStreamResponse } from '@ai-sdk/react-native/server';
+
+// Server
+return createMarkdownStreamResponse(result.textStream);
+
+// Client - use useMarkdownStream hook
+const { tree, stream, status } = useMarkdownStream({ api: '/api/markdown' });
 ```
 
 ## API Reference

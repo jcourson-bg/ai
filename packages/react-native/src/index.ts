@@ -74,6 +74,13 @@ export {
   type MarkdownChatMessage,
 } from './use-markdown-stream';
 
+// Transport utilities for integrating with useChat
+export {
+  createMarkdownFetch,
+  type MarkdownChatTransportConfig,
+  type MarkdownTextUIPart,
+} from './markdown-chat-transport';
+
 export {
   applyMarkdownTreePatch,
   isPatchEfficient,

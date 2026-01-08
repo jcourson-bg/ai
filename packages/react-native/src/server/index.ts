@@ -22,6 +22,13 @@ export {
   type MarkdownUIMessageStreamOptions,
 } from './markdown-stream';
 
+// Enhanced streaming that works with standard useChat
+export {
+  createMarkdownEnhancedTransform,
+  wrapWithMarkdownParsing,
+  type MarkdownEnhancedStreamOptions,
+} from './markdown-enhanced-stream';
+
 // Re-export types
 export type {
   MarkdownBlockNode,
