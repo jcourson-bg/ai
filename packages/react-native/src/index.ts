@@ -65,6 +65,15 @@ export {
   type MarkdownTextProps,
 } from './use-markdown-tree';
 
+// Server-side markdown streaming (v0 approach)
+export {
+  useMarkdownStream,
+  type UseMarkdownStreamOptions,
+  type UseMarkdownStreamResult,
+  type MarkdownStreamStatus,
+  type MarkdownChatMessage,
+} from './use-markdown-stream';
+
 export {
   applyMarkdownTreePatch,
   isPatchEfficient,
