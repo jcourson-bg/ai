@@ -2676,6 +2676,9 @@ importers:
 
   packages/react-native:
     dependencies:
+      '@ai-sdk/react':
+        specifier: workspace:*
+        version: link:../react
       react:
         specifier: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
         version: 18.3.1

@@ -39,6 +39,7 @@
     "server.d.ts"
   ],
   "dependencies": {
+    "@ai-sdk/react": "workspace:*",
     "throttleit": "2.1.0"
   },
   "devDependencies": {

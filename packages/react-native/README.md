@@ -1,28 +1,17 @@
 # AI SDK React Native
 
-React Native integration for the [AI SDK](https://ai-sdk.dev/docs) with optimized markdown streaming.
+React Native optimized utilities for the [AI SDK](https://ai-sdk.dev/docs).
 
 ## Overview
 
-This package provides React Native-optimized hooks and utilities for building AI-powered chat applications. The key innovation is **server-side markdown parsing with JSON tree streaming**, which dramatically improves rendering performance on React Native.
+This package provides React Native-specific optimizations for the AI SDK, including efficient markdown rendering. It re-exports all hooks from `@ai-sdk/react` so you can use the same API you're familiar with.
 
-### The Problem
+### Key Features
 
-Parsing markdown in React Native is expensive. Traditional approaches send raw text to the client, where it must be parsed on every render. This creates:
-
-- High CPU usage during streaming
-- Janky animations and scrolling
-- Battery drain on mobile devices
-
-### The Solution
-
-Instead of streaming raw markdown text, this package:
-
-1. **Parses markdown on the server** into a JSON tree structure
-2. **Streams JSON patches** to the client for efficient updates
-3. **Renders native components** directly from the tree
-
-This approach, inspired by v0's mobile app, shifts the expensive parsing work to the server where it belongs.
+- **Same API as `@ai-sdk/react`** - `useChat`, `useCompletion`, `useObject` all work the same
+- **Optimized markdown rendering** - Parse markdown to JSON trees for efficient native rendering
+- **Full agent support** - Tools, multi-step, reasoning, and all other parts work as expected
+- **Server-side parsing option** - For maximum performance, parse on the server and stream trees
 
 ## Installation
 
@@ -32,41 +21,111 @@ npm install @ai-sdk/react-native
 
 ## Usage
 
-### Client Side (React Native)
+### Basic Chat with Markdown
 
 ```tsx
-import { useMarkdownChat, MarkdownRenderer } from '@ai-sdk/react-native';
-import { View, Text, ScrollView } from 'react-native';
+import { useChat } from '@ai-sdk/react-native';
+import { MarkdownText } from '@ai-sdk/react-native';
+import { View, Text, TextInput, Button, ScrollView } from 'react-native';
 
 function ChatScreen() {
-  const { messages, sendMessage, status } = useMarkdownChat({
+  const { messages, input, handleInputChange, handleSubmit, status } = useChat({
     api: '/api/chat',
+  });
+
+  return (
+    <View style={{ flex: 1 }}>
+      <ScrollView>
+        {messages.map(message => (
+          <View key={message.id} style={styles.message}>
+            <Text style={styles.role}>{message.role}</Text>
+            {message.parts.map((part, index) => {
+              switch (part.type) {
+                case 'text':
+                  // Use MarkdownText for efficient markdown rendering
+                  return <MarkdownText key={index} text={part.text} />;
+
+                case 'reasoning':
+                  return (
+                    <View key={index} style={styles.reasoning}>
+                      <Text style={styles.reasoningLabel}>Thinking...</Text>
+                      <MarkdownText text={part.text} />
+                    </View>
+                  );
+
+                default:
+                  return null;
+              }
+            })}
+          </View>
+        ))}
+      </ScrollView>
+
+      <View style={styles.inputRow}>
+        <TextInput
+          value={input}
+          onChangeText={handleInputChange}
+          placeholder="Type a message..."
+          style={styles.input}
+        />
+        <Button
+          title="Send"
+          onPress={handleSubmit}
+          disabled={status !== 'ready'}
+        />
+      </View>
+    </View>
+  );
+}
+```
+
+### With Tool Calls (Agents)
+
+```tsx
+import { useChat, isToolUIPart, getToolName } from '@ai-sdk/react-native';
+import { MarkdownText } from '@ai-sdk/react-native';
+
+function AgentChat() {
+  const { messages, sendMessage, addToolOutput } = useChat({
+    api: '/api/agent',
+    // Auto-execute tools
+    onToolCall: async ({ toolCall }) => {
+      if (toolCall.toolName === 'get_weather') {
+        const result = await fetchWeather(toolCall.input.location);
+        addToolOutput({
+          tool: toolCall.toolName,
+          toolCallId: toolCall.toolCallId,
+          output: result,
+        });
+      }
+    },
   });
 
   return (
     <ScrollView>
       {messages.map(message => (
         <View key={message.id}>
-          {message.role === 'assistant' ? (
-            <MarkdownRenderer
-              tree={message.markdownTree}
-              components={{
-                // Custom components for each markdown element
-                paragraph: ({ children }) => (
-                  <Text style={styles.paragraph}>{children}</Text>
-                ),
-                heading: ({ level, children }) => (
-                  <Text style={styles[`h${level}`]}>{children}</Text>
-                ),
-                code: ({ language, value }) => (
-                  <CodeBlock language={language}>{value}</CodeBlock>
-                ),
-                // ... more components
-              }}
-            />
-          ) : (
-            <Text>{message.content}</Text>
-          )}
+          {message.parts.map((part, index) => {
+            // Text content
+            if (part.type === 'text') {
+              return <MarkdownText key={index} text={part.text} />;
+            }
+
+            // Tool invocations
+            if (isToolUIPart(part)) {
+              return (
+                <ToolCard
+                  key={index}
+                  name={getToolName(part)}
+                  state={part.state}
+                  input={part.input}
+                  output={part.output}
+                />
+              );
+            }
+
+            return null;
+          })}
         </View>
       ))}
     </ScrollView>
@@ -74,7 +133,63 @@ function ChatScreen() {
 }
 ```
 
-### Server Side (Next.js/Express/etc.)
+### Custom Markdown Components
+
+```tsx
+import {
+  MarkdownText,
+  MarkdownRenderer,
+  useMarkdownTree,
+} from '@ai-sdk/react-native';
+import { Text, View, Linking } from 'react-native';
+import SyntaxHighlighter from 'react-native-syntax-highlighter';
+
+// Option 1: Use MarkdownText with custom components
+function CustomMarkdownText({ text }) {
+  return (
+    <MarkdownText
+      text={text}
+      components={{
+        paragraph: ({ children }) => (
+          <Text style={styles.paragraph}>{children}</Text>
+        ),
+        heading: ({ level, children }) => (
+          <Text style={styles[`h${level}`]}>{children}</Text>
+        ),
+        code: ({ language, value }) => (
+          <SyntaxHighlighter language={language} style={styles.codeBlock}>
+            {value}
+          </SyntaxHighlighter>
+        ),
+        link: ({ href, children }) => (
+          <Text style={styles.link} onPress={() => Linking.openURL(href)}>
+            {children}
+          </Text>
+        ),
+        strong: ({ children }) => <Text style={styles.bold}>{children}</Text>,
+        emphasis: ({ children }) => (
+          <Text style={styles.italic}>{children}</Text>
+        ),
+      }}
+    />
+  );
+}
+
+// Option 2: Use the hook directly for more control
+function ManualMarkdown({ text }) {
+  const tree = useMarkdownTree(text);
+
+  if (!tree) return null;
+
+  return <MarkdownRenderer tree={tree} components={customComponents} />;
+}
+```
+
+### Server-Side Markdown Parsing (Maximum Performance)
+
+For the best performance on React Native, parse markdown on the server and stream the JSON tree. This is the approach used by v0's mobile app.
+
+**Server (Next.js API route):**
 
 ```typescript
 import { streamText } from 'ai';
@@ -89,82 +204,118 @@ export async function POST(req: Request) {
     messages,
   });
 
-  // Automatically parses markdown and streams JSON tree patches
-  return createMarkdownStreamResponse(result);
+  // Streams markdown tree patches instead of raw text
+  return createMarkdownStreamResponse(result.textStream, {
+    onFinish: tree => {
+      console.log('Final tree:', tree);
+    },
+  });
 }
+```
+
+**Client:**
+
+```tsx
+// For server-parsed markdown, use the streaming utilities
+import { applyMarkdownTreePatch, MarkdownRenderer } from '@ai-sdk/react-native';
 ```
 
 ## API Reference
 
-### Client Hooks
+### Hooks (re-exported from @ai-sdk/react)
 
-#### `useMarkdownChat(options)`
+- `useChat` - Chat hook with full message parts support
+- `useCompletion` - Completion hook for simple text generation
+- `useObject` - Structured object generation hook
 
-A React hook for chat interfaces with optimized markdown streaming.
+### Markdown Utilities
 
-Options:
+#### `MarkdownText`
 
-- `api` - The API endpoint URL
-- `id` - Optional chat ID
-- `initialMessages` - Initial messages array
-- `onError` - Error callback
-- `onFinish` - Completion callback
+Component that renders markdown text with optional custom components.
 
-Returns:
+```tsx
+<MarkdownText
+  text="# Hello **world**"
+  components={
+    {
+      /* custom renderers */
+    }
+  }
+  parseMarkdown={true} // set false to show raw text
+  fallback={<Text>Loading...</Text>}
+/>
+```
 
-- `messages` - Array of messages with `markdownTree` for assistant messages
-- `sendMessage` - Function to send a new message
-- `status` - Current status ('ready' | 'streaming' | 'error')
-- `stop` - Function to stop streaming
-- `error` - Current error if any
+#### `useMarkdownTree(text, options?)`
+
+Hook to parse markdown text into a tree structure.
+
+```tsx
+const tree = useMarkdownTree(text);
+// tree is MarkdownRoot | null
+```
+
+#### `MarkdownRenderer`
+
+Low-level component to render a pre-parsed markdown tree.
+
+```tsx
+<MarkdownRenderer
+  tree={markdownTree}
+  components={customComponents}
+  keyPrefix="msg-1"
+/>
+```
 
 ### Server Utilities
 
-#### `createMarkdownStreamResponse(result, options?)`
+Available from `@ai-sdk/react-native/server`:
 
-Creates a streaming response that parses markdown and sends JSON tree patches.
+- `parseMarkdownToTree(text)` - Parse markdown to JSON tree
+- `createMarkdownTreeStream(textStream)` - Transform text stream to tree patches
+- `createMarkdownStreamResponse(textStream)` - Create SSE response with tree patches
+- `applyMarkdownTreePatch(tree, patch)` - Apply a patch to a tree
+- `createMarkdownTreeDiff(oldTree, newTree)` - Create a diff between trees
 
-Options:
+## Message Parts
 
-- `onChunk` - Callback for each chunk
-- `onFinish` - Callback when streaming completes
+The AI SDK uses a parts-based message structure. Here are the common part types:
 
-#### `parseMarkdownToTree(markdown)`
+| Part Type     | Description                                       |
+| ------------- | ------------------------------------------------- |
+| `text`        | Text content (use `MarkdownText` to render)       |
+| `reasoning`   | Model reasoning/thinking (also supports markdown) |
+| `tool-{name}` | Tool invocation with input/output                 |
+| `file`        | File attachment                                   |
+| `source-url`  | Source reference                                  |
+| `step-start`  | Step boundary marker                              |
 
-Parses a markdown string into a JSON tree structure.
+Use the type guards from `ai` to check part types:
 
-#### `createMarkdownTreeDiff(oldTree, newTree)`
+```tsx
+import { isTextUIPart, isToolUIPart, isReasoningUIPart } from 'ai';
 
-Creates a minimal diff/patch between two markdown trees.
-
-## Markdown Tree Structure
-
-The JSON tree uses the following node types:
-
-```typescript
-type MarkdownNode =
-  | { type: 'root'; children: MarkdownNode[] }
-  | { type: 'paragraph'; children: MarkdownNode[] }
-  | { type: 'heading'; depth: 1 | 2 | 3 | 4 | 5 | 6; children: MarkdownNode[] }
-  | { type: 'text'; value: string }
-  | { type: 'strong'; children: MarkdownNode[] }
-  | { type: 'emphasis'; children: MarkdownNode[] }
-  | { type: 'code'; lang?: string; value: string }
-  | { type: 'inlineCode'; value: string }
-  | { type: 'link'; url: string; title?: string; children: MarkdownNode[] }
-  | { type: 'image'; url: string; alt?: string; title?: string }
-  | { type: 'list'; ordered: boolean; start?: number; children: MarkdownNode[] }
-  | { type: 'listItem'; children: MarkdownNode[] }
-  | { type: 'blockquote'; children: MarkdownNode[] }
-  | { type: 'thematicBreak' }
-  | { type: 'break' };
+message.parts.map(part => {
+  if (isTextUIPart(part)) return <MarkdownText text={part.text} />;
+  if (isToolUIPart(part)) return <ToolCard part={part} />;
+  if (isReasoningUIPart(part)) return <Reasoning text={part.text} />;
+});
 ```
 
 ## Performance Tips
 
-1. **Memoize custom components** passed to `MarkdownRenderer`
-2. **Use `React.memo`** on parent components to prevent unnecessary re-renders
-3. **Consider virtualization** for long chat histories
+1. **Memoize custom components** - Wrap your component map in `useMemo`
+2. **Use server-side parsing** - For maximum performance, parse on the server
+3. **Virtualize long lists** - Use FlatList/FlashList for chat histories
+4. **Throttle updates** - Use `experimental_throttle` option in `useChat`
+
+```tsx
+const { messages } = useChat({
+  api: '/api/chat',
+  experimental_throttle: 50, // Throttle updates to 50ms
+});
+```
 
 ## License
 

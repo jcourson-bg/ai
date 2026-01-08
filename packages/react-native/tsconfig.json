@@ -8,5 +8,6 @@
     "outDir": "dist"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["dist", "build", "node_modules", "tsup.config.ts"]
+  "exclude": ["dist", "build", "node_modules", "tsup.config.ts"],
+  "references": [{ "path": "../react" }]
 }
