@@ -36,6 +36,7 @@
     { "path": "packages/provider" },
     { "path": "packages/provider-utils" },
     { "path": "packages/react" },
+    { "path": "packages/react-native" },
     { "path": "packages/replicate" },
     { "path": "packages/revai" },
     { "path": "packages/rsc" },
