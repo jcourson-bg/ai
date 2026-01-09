@@ -192,6 +192,113 @@ When you write to a data part with the same ID, the client automatically reconci
 
 The reconciliation happens automatically - simply use the same `id` when writing to the stream.
 
+## Streaming a JSON “document tree” + patches (great for React Native)
+
+If markdown/MDX parsing is expensive on the client (common in React Native), you can do **less work on-device** by streaming a **pre-parsed JSON tree** (AST) from the server and then streaming **patches** as the model response streams.
+
+This pattern keeps the `useChat` DX (tools, status, stop/regenerate, persistence) but lets the UI render from structured data instead of parsing markdown strings.
+
+### Recommended shape
+
+- **`data-mdxTree` (persistent)**: occasional full snapshots of the current tree (use `id` so it updates in place)
+- **`data-mdxPatch` (transient)**: frequent incremental patches (set `transient: true` so message history does not grow)
+
+You can use any patch protocol you want (JSON Patch, jsondiffpatch, a custom protocol). The SDK will deliver these `data-*` chunks through `onData`.
+
+### Server example
+
+```ts filename="app/api/chat/route.ts"
+import { streamText, convertToModelMessages } from 'ai';
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+type MdxTree = unknown; // your AST type
+type Patch = unknown; // your patch protocol
+
+export async function POST(req: Request) {
+  const { messages } = await req.json();
+  const modelMessages = await convertToModelMessages(messages);
+
+  const stream = createUIMessageStream({
+    execute: ({ writer }) => {
+      // 1) Initial tree snapshot (stored on the message)
+      writer.write({
+        type: 'data-mdxTree',
+        id: 'root',
+        data: { tree: /* initial AST */ null as unknown as MdxTree },
+      });
+
+      const result = streamText({
+        model: openai('gpt-4o'),
+        messages: modelMessages,
+        onChunk: ({ chunk }) => {
+          if (chunk.type !== 'text-delta' || chunk.text.length === 0) return;
+
+          // 2) Send a patch (transient: doesn't bloat message history)
+          writer.write({
+            type: 'data-mdxPatch',
+            data: {
+              patch: /* derived from chunk.text */ null as unknown as Patch,
+            },
+            transient: true,
+          });
+        },
+        onFinish: () => {
+          // 3) Optional final snapshot for recovery/persistence
+          writer.write({
+            type: 'data-mdxTree',
+            id: 'root',
+            data: { tree: /* final AST */ null as unknown as MdxTree },
+          });
+        },
+      });
+
+      writer.merge(result.toUIMessageStream());
+    },
+  });
+
+  return createUIMessageStreamResponse({ stream });
+}
+```
+
+### React Native / Expo client example
+
+In React Native you typically keep the “tree cache” in your own state/store and render from it. The key integration point is `onData`, and if you use Expo you can provide `expo/fetch` to the transport:
+
+```tsx filename="app/(tabs)/index.tsx"
+import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
+import { fetch as expoFetch } from 'expo/fetch';
+import { useState } from 'react';
+
+type MdxTree = unknown;
+type Patch = unknown;
+
+export default function ChatScreen() {
+  const [tree, setTree] = useState<MdxTree | null>(null);
+
+  useChat({
+    transport: new DefaultChatTransport({
+      api: 'https://your-server.example.com/api/chat',
+      fetch: expoFetch as unknown as typeof globalThis.fetch,
+    }),
+    onData: part => {
+      if (part.type === 'data-mdxTree') {
+        setTree(part.data.tree);
+      }
+
+      if (part.type === 'data-mdxPatch') {
+        // Apply patch to your local cache:
+        // setTree(prev => applyPatch(prev, part.data.patch))
+      }
+    },
+  });
+
+  // Render from `tree` (no markdown parsing required)
+  return null;
+}
+```
+
 ## Processing Data on the Client
 
 ### Using the onData Callback

@@ -65,7 +65,10 @@ export async function POST(req: Request) {
       writer.write({
         type: 'data-mdxTree',
         id: ROOT_ID,
-        data: { rootId: ROOT_ID, tree: createInitialTree() } satisfies MdxTreeData,
+        data: {
+          rootId: ROOT_ID,
+          tree: createInitialTree(),
+        } satisfies MdxTreeData,
       } satisfies UIMessageChunk<never, { mdxTree: MdxTreeData }>);
 
       let fullText = '';
@@ -112,4 +115,3 @@ export async function POST(req: Request) {
 
   return createUIMessageStreamResponse({ stream });
 }
-

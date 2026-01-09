@@ -172,6 +172,14 @@ Pick the approach that best matches how you want to manage providers across your
 
 Now that you have an API route that can query an LLM, it's time to setup your frontend. The AI SDK's [ UI ](/docs/ai-sdk-ui) package abstracts the complexity of a chat interface into one hook, [`useChat`](/docs/reference/ai-sdk-ui/use-chat).
 
+<Note>
+  If you need high-performance rich rendering on-device (e.g. markdown/MDX in
+  React Native), you can stream a pre-parsed JSON “document tree” and
+  incremental patches alongside the model output using [`data-*` UI
+  parts](/docs/ai-sdk-ui/streaming-data#streaming-a-json-document-tree--patches-great-for-react-native).
+  This keeps the `useChat` DX while doing less work on the client.
+</Note>
+
 Update your root page (`app/(tabs)/index.tsx`) with the following code to show a list of chat messages and provide a user message input:
 
 ```tsx filename="app/(tabs)/index.tsx"

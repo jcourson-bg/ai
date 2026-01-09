@@ -41,3 +41,10 @@ To learn more about OpenAI, Next.js, and the AI SDK take a look at the following
 - [Vercel AI Playground](https://ai-sdk.dev/playground)
 - [OpenAI Documentation](https://platform.openai.com/docs) - learn about OpenAI features and API.
 - [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+
+## Included demos
+
+This example app includes many routes under `app/` and `app/api/`. Two useful patterns related to streaming custom UI data:
+
+- **Streaming data UI parts**: `app/use-chat-data-ui-parts` and `app/api/use-chat-data-ui-parts`
+- **Streaming a JSON “document tree” + patches** (markdown/MDX-friendly): `app/use-chat-mdx-tree-patches` and `app/api/use-chat-mdx-tree-patches`
