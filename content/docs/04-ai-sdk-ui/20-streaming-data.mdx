@@ -205,6 +205,20 @@ This pattern keeps the `useChat` DX (tools, status, stop/regenerate, persistence
 
 You can use any patch protocol you want (JSON Patch, jsondiffpatch, a custom protocol). The SDK will deliver these `data-*` chunks through `onData`.
 
+To make this easier, the `ai` package ships a minimal, JSON-serializable tree format and patch helpers:
+
+- `MdxTree` / `MdxTreeNode`
+- `MdxTreePatch`
+- `applyMdxTreePatch()` / `applyMdxTreePatches()`
+
+And `@ai-sdk/react` provides a renderer:
+
+- `renderMdxTree()`
+
+If you parse MDX with remark/unified on the server, you can also use:
+
+- `convertRemarkMdxToMdxTree()`
+
 ### Server example
 
 ```ts filename="app/api/chat/route.ts"
@@ -212,8 +226,8 @@ import { streamText, convertToModelMessages } from 'ai';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { openai } from '@ai-sdk/openai';
 
-type MdxTree = unknown; // your AST type
-type Patch = unknown; // your patch protocol
+type MdxTree = unknown; // your AST type (or use `MdxTree` from 'ai')
+type Patch = unknown; // your patch protocol (or use `MdxTreePatch` from 'ai')
 
 export async function POST(req: Request) {
   const { messages } = await req.json();

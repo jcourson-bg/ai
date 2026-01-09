@@ -2,71 +2,33 @@
 
 import ChatInput from '@/components/chat-input';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport, UIMessage, type FinishReason } from 'ai';
+import { renderMdxTree } from '@ai-sdk/react';
+import {
+  applyMdxTreePatch,
+  DefaultChatTransport,
+  type FinishReason,
+  type MdxTree,
+  type MdxTreePatch,
+  UIMessage,
+} from 'ai';
 import { useMemo, useState } from 'react';
 
-type MdxLikeNode =
-  | { type: 'root'; children: MdxLikeNode[] }
-  | { type: 'paragraph'; children: MdxLikeNode[] }
-  | { type: 'text'; value: string };
-
-type MdxTreeData = { rootId: string; tree: MdxLikeNode };
-type MdxAppendPatchData = { rootId: string; path: string; append: string };
+type MdxTreeData = { rootId: string; tree: MdxTree };
+type MdxPatchData = { rootId: string; patch: MdxTreePatch };
 
 type MyMessage = UIMessage<
   never,
   {
     mdxTree: MdxTreeData;
-    mdxPatch: MdxAppendPatchData;
+    mdxPatch: MdxPatchData;
   }
 >;
-
-function getTextValue(tree: MdxLikeNode | null): string {
-  if (
-    tree?.type !== 'root' ||
-    tree.children[0]?.type !== 'paragraph' ||
-    tree.children[0].children[0]?.type !== 'text'
-  ) {
-    return '';
-  }
-
-  return tree.children[0].children[0].value;
-}
-
-function applyAppendPatch(tree: MdxLikeNode | null, patch: MdxAppendPatchData) {
-  // Demo patcher: expects the server to patch the single text node.
-  // In a real app, you'd implement a proper JSON Pointer patcher
-  // (or jsondiffpatch/JSON Patch) and handle multiple nodes.
-  if (tree == null) return tree;
-
-  if (patch.path !== '/children/0/children/0/value') return tree;
-
-  if (
-    tree.type !== 'root' ||
-    tree.children[0]?.type !== 'paragraph' ||
-    tree.children[0].children[0]?.type !== 'text'
-  ) {
-    return tree;
-  }
-
-  const currentValue = tree.children[0].children[0].value;
-
-  return {
-    ...tree,
-    children: [
-      {
-        ...tree.children[0],
-        children: [{ type: 'text', value: currentValue + patch.append }],
-      },
-    ],
-  } satisfies MdxLikeNode;
-}
 
 export default function Chat() {
   const [lastFinishReason, setLastFinishReason] = useState<
     FinishReason | undefined
   >(undefined);
-  const [tree, setTree] = useState<MdxLikeNode | null>(null);
+  const [tree, setTree] = useState<MdxTree | null>(null);
 
   const { error, status, sendMessage, messages, regenerate, stop } =
     useChat<MyMessage>({
@@ -79,7 +41,9 @@ export default function Chat() {
         }
 
         if (dataPart.type === 'data-mdxPatch') {
-          setTree(prev => applyAppendPatch(prev, dataPart.data));
+          setTree(prev =>
+            prev != null ? applyMdxTreePatch(prev, dataPart.data.patch) : prev,
+          );
         }
       },
       onFinish: ({ finishReason }) => {
@@ -87,13 +51,18 @@ export default function Chat() {
       },
     });
 
-  const treeText = useMemo(() => getTextValue(tree), [tree]);
+  const rendered = useMemo(() => {
+    if (tree == null) return null;
+
+    // Web demo: uses tag names directly. In React Native, you would map 'p', 'strong', etc.
+    return renderMdxTree(tree);
+  }, [tree]);
 
   return (
     <div className="flex flex-col py-24 mx-auto w-full max-w-md stretch">
       <div className="mb-6 p-3 border rounded">
         <div className="font-medium">Rendered from streamed “MDX tree”</div>
-        <div className="whitespace-pre-wrap">{treeText}</div>
+        <div className="whitespace-pre-wrap">{rendered}</div>
       </div>
 
       {messages.map(message => (
