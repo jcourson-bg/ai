@@ -17,6 +17,7 @@ export {
 export { type ChatTransport } from './chat-transport';
 export { convertFileListToFileUIParts } from './convert-file-list-to-file-ui-parts';
 export { convertToModelMessages } from './convert-to-model-messages';
+export { convertRemarkMdxToMdxTree } from './convert-remark-mdx-to-mdx-tree';
 export { DefaultChatTransport } from './default-chat-transport';
 export {
   DirectChatTransport,
@@ -69,3 +70,14 @@ export {
   validateUIMessages,
   type SafeValidateUIMessagesResult,
 } from './validate-ui-messages';
+
+// Experimental: JSON-serializable MDX tree + patch utilities.
+export {
+  applyMdxTreePatch,
+  applyMdxTreePatches,
+  type MdxTree,
+  type MdxTreeElementNode,
+  type MdxTreeNode,
+  type MdxTreePatch,
+  type MdxTreeTextNode,
+} from './mdx-tree';
