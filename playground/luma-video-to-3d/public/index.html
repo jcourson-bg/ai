@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Luma video → orbit demo</title>
+    <script
+      type="module"
+      src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"
+    ></script>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Video → orbit (Luma Ray-2)</h1>
+      <p class="muted">
+        Luma's public Dream Machine API does not return a 3D mesh. The closest
+        thing supported today is to take a frame from your video and ask Ray-2
+        to orbit around the subject — which gives a 3D-feeling rendered view.
+        If you have a <code>.glb</code> exported from Luma Genie, you can drop
+        it in the 3D viewer at the bottom.
+      </p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>1. Pick a video and a frame</h2>
+        <input id="videoFile" type="file" accept="video/*" />
+        <div class="row">
+          <video id="videoPreview" controls playsinline muted></video>
+          <div>
+            <label>
+              Frame time (sec)
+              <input id="frameTime" type="number" min="0" step="0.1" value="0" />
+            </label>
+            <button id="grabFrame" type="button">Grab frame</button>
+            <p class="muted small">
+              We extract a JPEG from <code>&lt;canvas&gt;</code> and upload it
+              to this server so Luma can fetch it.
+            </p>
+          </div>
+        </div>
+        <canvas id="frameCanvas" hidden></canvas>
+        <div id="framePreview"></div>
+
+        <details>
+          <summary>…or paste an existing public image URL</summary>
+          <input
+            id="manualUrl"
+            type="url"
+            placeholder="https://example.com/pottery.jpg"
+            style="width: 100%"
+          />
+          <p class="muted small">
+            Use this if your server isn't publicly reachable. Luma must be able
+            to GET this URL.
+          </p>
+        </details>
+      </section>
+
+      <section class="card">
+        <h2>2. Generate orbit</h2>
+        <label>
+          Prompt
+          <textarea id="prompt" rows="2">
+Smooth slow orbit around the object, locked-on, even studio lighting, no zoom</textarea>
+        </label>
+        <div class="row">
+          <label>
+            Camera motion
+            <select id="cameraMotion">
+              <option value="">(none / from prompt)</option>
+              <option value="orbit_left" selected>orbit_left</option>
+              <option value="orbit_right">orbit_right</option>
+              <option value="push_in">push_in</option>
+              <option value="pull_out">pull_out</option>
+              <option value="crane_up">crane_up</option>
+              <option value="crane_down">crane_down</option>
+              <option value="tiny_planet">tiny_planet</option>
+              <option value="aerial">aerial</option>
+              <option value="static">static</option>
+            </select>
+          </label>
+          <label>
+            Resolution
+            <select id="resolution">
+              <option value="540p">540p</option>
+              <option value="720p" selected>720p</option>
+              <option value="1080p">1080p</option>
+            </select>
+          </label>
+          <label>
+            Duration
+            <select id="duration">
+              <option value="5s" selected>5s</option>
+              <option value="9s">9s</option>
+            </select>
+          </label>
+        </div>
+        <button id="generate" type="button" disabled>Generate</button>
+        <div id="status" class="muted small"></div>
+      </section>
+
+      <section class="card">
+        <h2>3. Result</h2>
+        <video id="resultVideo" controls playsinline></video>
+      </section>
+
+      <section class="card">
+        <h2>4. (Optional) Drop a .glb from Luma Genie here</h2>
+        <input id="glbFile" type="file" accept=".glb,model/gltf-binary" />
+        <model-viewer
+          id="modelViewer"
+          camera-controls
+          touch-action="pan-y"
+          auto-rotate
+          shadow-intensity="1"
+          exposure="1"
+          alt="3D model preview"
+        ></model-viewer>
+      </section>
+    </main>
+
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
